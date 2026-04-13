@@ -16,21 +16,32 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 # 3. File Upload
-uploaded_file = st.file_uploader("Upload bank statement (CSV/PDF)", type=["csv"]) 
-
-# Note: We're starting with CSV as it's cleaner for Python math. 
-# We'll add the PDF-to-CSV converter logic once the math is stable.
+uploaded_file = st.file_uploader("Upload bank statement (CSV)", type=["csv"]) 
 
 if uploaded_file is not None and st.session_state.raw_data is None:
     df = pd.read_csv(uploaded_file)
     
-    # Cleaning "Amount" for Python math
-    # Converts European "1.234,56" to "1234.56"
-    if df['Amount'].dtype == object:
-        df['Amount'] = df['Amount'].str.replace('.', '', regex=False).str.replace(',', '.', regex=False).astype(float)
+    # NEW ROBUST CLEANING LOGIC
+    if 'Amount' in df.columns:
+        # 1. Convert to string just in case
+        df['Amount'] = df['Amount'].astype(str)
+        # 2. Remove currency symbols and spaces
+        df['Amount'] = df['Amount'].str.replace('€', '', regex=False).str.replace(' ', '', regex=False)
+        # 3. Handle European format: "1.234,56" -> "1234.56"
+        # We replace the thousands-separator (.) with nothing, then the decimal (,) with a (.)
+        if df['Amount'].str.contains(',').any() and df['Amount'].str.contains('.').any():
+             df['Amount'] = df['Amount'].str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+        elif df['Amount'].str.contains(',').any():
+             df['Amount'] = df['Amount'].str.replace(',', '.', regex=False)
+             
+        # 4. Final conversion to a real number (float)
+        df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+        
+        # 5. Drop any rows where Amount couldn't be converted
+        df = df.dropna(subset=['Amount'])
     
     st.session_state.raw_data = df
-    st.success("Data loaded and structured successfully!")
+    st.success("Data cleaned and loaded!")
 
 # 4. Deterministic Math (Python does the counting)
 if st.session_state.raw_data is not None:
