@@ -101,7 +101,7 @@ if st.session_state.raw_data is not None:
         """
         
         # Call Gemini Brain
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(full_prompt)
         
         # Display AI response and save to history
