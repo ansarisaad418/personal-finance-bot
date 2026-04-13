@@ -76,19 +76,27 @@ if st.session_state.raw_data is not None:
         # We only send a summary of data to save tokens/efficiency
         data_summary = df.describe().to_string() 
         
+       # Optimized for a professional Treasury Analyst persona
         full_prompt = f"""
-        User Data Summary: {data_summary}
-        Chat History: {st.session_state.chat_history[-3:]} 
-        User Question: {prompt}
+        CONTEXT:
+        You are a Senior Treasury Analyst. You have a detailed summary of the user's financial transactions.
         
-        Instruction: You are a professional Treasury Analyst. Use the math provided above. 
-        If the question is unrelated to finance, politely decline.
+        DATA SUMMARY (Python-calculated):
+        {data_summary}
+        
+        CONVERSATION LOG:
+        {st.session_state.chat_history[-3:]} 
+        
+        USER QUESTION: 
+        {prompt}
+        
+        INSTRUCTIONS:
+        1. Use the DATA SUMMARY to provide exact figures.
+        2. If the user asks about savings, look at positive inflows vs fixed outflows.
+        3. Maintain a professional, witty, yet firm tone.
+        4. If the question is non-financial, trigger the error: "Stupid bot error: I cannot talk about anything unrelated to your finances."
         """
         
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Use the explicit model path
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         response = model.generate_content(full_prompt)
-        
-        # Add AI response to history
-        st.session_state.chat_history.append({"role": "assistant", "content": response.text})
-        with st.chat_message("assistant"):
-            st.markdown(response.text)
