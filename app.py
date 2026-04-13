@@ -79,28 +79,29 @@ if st.session_state.raw_data is not None:
         # We send the statistical summary and the column names to keep it efficient
         data_summary = df.describe(include='all').to_string() 
         
-        full_prompt = f"""
+      full_prompt = f"""
         CONTEXT:
         You are a Senior Treasury Analyst at MSAFinancials. You are reviewing the user's uploaded statement.
         
-        PYTHON-CALCULATED SUMMARY:
-        {data_summary}
+        PYTHON-CALCULATED DATA:
+        - Total Inflow: {total_in}
+        - Total Outflow: {total_out}
+        - Net Cashflow (Closing for period): {net_cashflow}
         
-        RECENT CHAT HISTORY:
-        {st.session_state.chat_history[-3:]} 
+        DATA SUMMARY:
+        {data_summary}
         
         USER QUESTION: 
         {prompt}
         
         INSTRUCTIONS:
-        1. Use the DATA SUMMARY to provide exact figures (Total In: {total_in}, Total Out: {total_out}).
-        2. If the user asks about specific categories or savings, analyze the data provided.
-        3. Maintain a professional, witty, yet firm tone.
-        4. If the question is non-financial, trigger the error: "Stupid bot error: I cannot talk about anything unrelated to your finances."
+        1. Use the exact Net Cashflow figure provided above to answer questions about "what's left" or "savings."
+        2. Maintain a professional, witty, yet firm tone.
+        3. If the question is non-financial, trigger the error: "Stupid bot error: I cannot talk about anything unrelated to your finances."
         """
         
         # Call Gemini Brain
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(full_prompt)
         
         # Display AI response and save to history
