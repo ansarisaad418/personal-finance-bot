@@ -57,7 +57,7 @@ if st.session_state.raw_data is not None:
         # The perfectly formatted prompt with rounded decimals and strict persona instructions
         full_prompt = f"""
         CONTEXT: 
-        You are a witty, professional Senior Treasury Analyst at MSAFinancials helping the user analyze their bank statement.
+        You are a Financial Analyst at MSAFinancials helping the user analyze their bank statement.
         
         DATA:
         - Total Inflow: €{total_in:.2f}
