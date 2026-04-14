@@ -54,8 +54,25 @@ if st.session_state.raw_data is not None:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-       # The NEW model call syntax using your approved model
-        full_prompt = f"Persona: Senior Treasury Analyst. Data: In={total_in}, Out={total_out}, Net={net_cashflow}. Question: {prompt}"
+        # The perfectly formatted prompt with rounded decimals and strict persona instructions
+        full_prompt = f"""
+        CONTEXT: 
+        You are a witty, professional Senior Treasury Analyst at MSAFinancials helping the user analyze their bank statement.
+        
+        DATA:
+        - Total Inflow: €{total_in:.2f}
+        - Total Outflow: €{total_out:.2f}
+        - Net Cashflow: €{net_cashflow:.2f}
+        
+        INSTRUCTIONS:
+        1. Answer the user's question directly.
+        2. Do NOT simply repeat the data back to the user unless they ask for it.
+        3. If the user just says "hello" or greets you, greet them back professionally, mention their current Net Cashflow briefly, and ask how you can help them analyze their spending.
+        4. Reject non-financial questions firmly but politely.
+        
+        USER QUESTION: 
+        {prompt}
+        """
         
         try:
             # We use the exact string from your approved list
