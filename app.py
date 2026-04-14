@@ -3,8 +3,8 @@ import google.generativeai as genai
 import pandas as pd
 
 # 1. Setup & Security
-# Make sure GEMINI_API_KEY is in your Streamlit Secrets!
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Force the library to use the stable V1 API to avoid the 404 error
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"], transport='grpc') 
 
 st.set_page_config(page_title="MSAFinancials Analyst", layout="wide")
 st.title("📈 MSAFinancials: Professional Treasury Analyst")
