@@ -7,7 +7,7 @@ import pandas as pd
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.set_page_config(page_title="MSAFinancials Analyst", layout="wide")
-st.title("📈 MSAFinancials: Professional Treasury Analyst")
+st.title("📈 MSAFinancials: Professional Financial Analyst")
 
 # 2. Initialize Session State
 if "raw_data" not in st.session_state:
@@ -54,28 +54,34 @@ if st.session_state.raw_data is not None:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # The perfectly formatted prompt with rounded decimals and strict persona instructions
+        # Convert the actual raw data to a string format for the AI to read line-by-line
+        raw_csv_string = df.to_csv(index=False)
+
+        # The upgraded prompt with raw data and new calculation rules
         full_prompt = f"""
         CONTEXT: 
-        You are a Financial Analyst at MSAFinancials helping the user analyze their bank statement.
+        You are a witty, professional Financial Analyst at MSAFinancials helping the user analyze their bank statement.
         
-        DATA:
+        DATA TOTALS:
         - Total Inflow: €{total_in:.2f}
         - Total Outflow: €{total_out:.2f}
         - Net Cashflow: €{net_cashflow:.2f}
         
+        RAW TRANSACTION DATA:
+        {raw_csv_string}
+        
         INSTRUCTIONS:
-        1. Answer the user's question directly.
-        2. Do NOT simply repeat the data back to the user unless they ask for it.
-        3. If the user just says "hello" or greets you, greet them back professionally, mention their current Net Cashflow briefly, and ask how you can help them analyze their spending.
-        4. Reject non-financial questions firmly but politely.
+        1. Answer the user's question directly by looking at the raw transaction data.
+        2. If the user asks about a specific category (like groceries, rent, or a specific person), find all relevant transactions in the data, sum them up, and give them the exact total.
+        3. Do NOT simply repeat the data back to the user unless they ask for it.
+        4. If the user just says "hello" or greets you, greet them back professionally, mention their current Net Cashflow briefly, and ask how you can help them analyze their spending.
+        5. Reject non-financial questions firmly but politely.
         
         USER QUESTION: 
         {prompt}
         """
         
         try:
-            # We use the exact string from your approved list
             response = client.models.generate_content(
                 model="gemini-2.5-flash", 
                 contents=full_prompt
