@@ -60,7 +60,7 @@ if st.session_state.raw_data is not None:
         try:
             # We use the exact string from your approved list
             response = client.models.generate_content(
-                model="gemini-2.5-pro", 
+                model="gemini-2.0-flash", 
                 contents=full_prompt
             )
             
