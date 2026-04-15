@@ -4,6 +4,7 @@ import pandas as pd
 import re
 import csv
 from io import StringIO
+import plotly.express as px
 
 # 1. Setup & Security
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
@@ -21,11 +22,6 @@ if "auto_currency" not in st.session_state:
 # --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.header("⚙️ Settings")
-    st.session_state.currency_sym = st.selectbox(
-        "Display Currency", 
-        options=["€", "₹", "$", "£"], 
-        index=["€", "₹", "$", "£"].index(st.session_state.auto_currency)
-    )
     if st.button("Clear Data & Restart"):
         st.session_state.raw_data = None
         st.session_state.chat_history = []
@@ -35,12 +31,12 @@ st.title("📈 MSAFinancials: Professional Financial Analyst")
 
 # --- ONBOARDING UI & FILE UPLOAD ---
 if st.session_state.raw_data is None:
-    # The "Hero" Section - Only shows before a file is uploaded
     st.markdown("### 👋 Welcome to your Personal Finance AI!")
     st.info(
         "I am your intelligent financial assistant. Upload your raw bank statement, and I will automatically "
         "stitch broken rows, categorize your spending, and provide a chat interface to answer questions like: \n"
-        "*'How much did I spend on Zomato this month?'* or *'What is my total cash flow?'*"
+        "*'How much did I spend ordering food online this month?'* or *'What is my total cash flow?'*\n\n"
+        "*(Note: Currently, I only accept .csv files)*"
     )
     
     colA, colB, colC = st.columns(3)
@@ -117,14 +113,14 @@ if st.session_state.raw_data is None:
             df['Category'] = df['Clean_Description'].apply(categorize)
             
             st.session_state.raw_data = df
-            st.rerun() # Refresh to hide the onboarding UI and show the dashboard
+            st.rerun() 
         else:
             st.error("Could not extract valid transaction data. Please check the CSV format.")
 
 # --- DASHBOARD & ANALYSIS SECTION ---
 if st.session_state.raw_data is not None:
     df = st.session_state.raw_data
-    sym = st.session_state.currency_sym
+    sym = st.session_state.auto_currency
     
     total_in = df[df['Amount'] > 0]['Amount'].sum()
     total_out = df[df['Amount'] < 0]['Amount'].sum()
@@ -141,8 +137,26 @@ if st.session_state.raw_data is not None:
     if 'Category' in df.columns:
         cat_summary = df.groupby('Category')['Amount'].sum().reset_index()
         cat_summary['Amount'] = cat_summary['Amount'].round(2)
-        category_summary_str = cat_summary.to_csv(index=False)
         
+        # --- PLOTLY INTERACTIVE DONUT CHART ---
+        expenses_df = cat_summary[cat_summary['Amount'] < 0].copy()
+        expenses_df['Amount'] = expenses_df['Amount'].abs()
+        
+        if not expenses_df.empty:
+            st.markdown("### 🍩 Spending Breakdown")
+            fig = px.pie(
+                expenses_df, 
+                values='Amount', 
+                names='Category', 
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig, use_container_width=True)
+            st.divider()
+
+        category_summary_str = cat_summary.to_csv(index=False)
         others_df = df[df['Category'] == 'Others'].head(50)
         others_str = others_df[['Clean_Description', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
     else:
@@ -153,7 +167,7 @@ if st.session_state.raw_data is not None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Ask about your finances (e.g., 'How much did I spend on food?')..."):
+    if prompt := st.chat_input("Ask about your finances (e.g., 'How much did I spend ordering food online?')..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
