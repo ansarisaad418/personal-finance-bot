@@ -1,9 +1,6 @@
 import streamlit as st
 from google import genai
 import pandas as pd
-import re
-import csv
-from io import StringIO
 import plotly.express as px
 
 # 1. Setup & Security
@@ -16,8 +13,6 @@ if "raw_data" not in st.session_state:
     st.session_state.raw_data = None
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "auto_currency" not in st.session_state:
-    st.session_state.auto_currency = "€" 
 
 # --- SIDEBAR SETTINGS ---
 with st.sidebar:
@@ -34,93 +29,58 @@ if st.session_state.raw_data is None:
     st.markdown("### 👋 Welcome to your Personal Finance AI!")
     st.info(
         "I am your intelligent financial assistant. Upload your raw bank statement, and I will automatically "
-        "stitch broken rows, categorize your spending, and provide a chat interface to answer questions like: \n"
+        "categorize your spending and provide a chat interface to answer questions like: \n"
         "*'How much did I spend ordering food online this month?'* or *'What is my total cash flow?'*\n\n"
-        "*(Note: Currently, I only accept .csv files)*"
+        "*(Note: Currently, I only accept standard European .csv files)*"
     )
-    
-    colA, colB, colC = st.columns(3)
-    colA.markdown("**📊 Auto-Categorization**\nInstantly tags food, transport, and health expenses.")
-    colB.markdown("**🧠 AI Insights**\nChat directly with your data using Google's Gemini models.")
-    colC.markdown("**🌍 Multi-Currency**\nSeamlessly handles Euros, Indian Rupees, and messy bank formats.")
     
     st.divider()
     
-    uploaded_file = st.file_uploader("Upload your bank statement (CSV)", type=["csv"]) 
+    uploaded_file = st.file_uploader("Upload bank statement (CSV)", type=["csv"]) 
 
     if uploaded_file is not None:
-        raw_text = uploaded_file.getvalue().decode('utf-8')
+        df = pd.read_csv(uploaded_file)
         
-        # Currency Auto-Detection
-        raw_text_dump = raw_text.lower()
-        if any(indicator in raw_text_dump for indicator in ['inr', 'rs.', '₹', 'rupee', 'gurugram', 'mumbai', 'delhi']):
-            st.session_state.auto_currency = "₹"
-        elif any(indicator in raw_text_dump for indicator in ['usd', '$']):
-            st.session_state.auto_currency = "$"
+        # Original European Formatting Logic
+        if 'Amount' in df.columns:
+            df['Amount'] = df['Amount'].astype(str).str.replace('€', '', regex=False).str.replace(' ', '', regex=False)
+            def clean_currency(val):
+                if ',' in val and '.' in val: return val.replace('.', '').replace(',', '.')
+                if ',' in val: return val.replace(',', '.')
+                return val
+            df['Amount'] = df['Amount'].apply(clean_currency)
+            df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+            df = df.dropna(subset=['Amount'])
             
-        reader = csv.reader(StringIO(raw_text))
-        rows = list(reader)
-
-        records = []
-        # Custom ICICI / Messy CSV Stitcher
-        for i in range(len(rows)):
-            row = rows[i]
-            if len(row) > 0 and (re.match(r'^\d{4}-\d{2}-\d{2}', row[0]) or re.match(r'^\d{2}-\d{2}-\d{4}', row[0])):
-                date_val = row[0]
-                nums = [val for val in row if val.strip().replace('.','',1).isdigit()]
-                
-                desc_parts = []
-                for offset in [-1, 0, 1]:
-                    if 0 <= i + offset < len(rows):
-                        adj_row = rows[i + offset]
-                        words = [val.strip().replace('\n', ' ') for val in adj_row if val.strip() and not val.strip().replace('.','',1).isdigit() and not re.match(r'^\d{4}-\d{2}-\d{2}', val.strip())]
-                        desc_parts.extend(words)
-                
-                full_desc = " ".join(desc_parts)
-                amount = 0.0
-                if len(nums) >= 2:
-                    amount = float(nums[-2]) 
-                    
-                records.append({'Date': date_val, 'Description': full_desc, 'Amount': amount})
-
-        df = pd.DataFrame(records)
-        
-        if not df.empty:
-            def extract_clean_name(text):
-                text = str(text).lower()
-                parts = re.split(r'[\/\-\@]', text) 
-                ignore = ['upi', 'nfs', 'cash', 'wdl', 'bank', 'ltd', 'payments', 'oid', 'payvia', 'imps', 'neft', 'rtgs']
-                cleaned = [p.strip() for p in parts if p.strip() and p.strip() not in ignore and not p.strip().isnumeric()]
-                return " ".join(cleaned[:3]).title()
+            # Identify the description column (usually 'Description', 'Name', or 'Counterparty')
+            desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
+            target_col = desc_cols[0] if desc_cols else df.columns[0]
             
-            df['Clean_Description'] = df['Description'].apply(extract_clean_name)
-            
-            df['Amount'] = df.apply(lambda row: -abs(row['Amount']) if any(x in str(row['Clean_Description']).lower() for x in ['zomato', 'blinkit', 'swiggy', 'atm', 'uber']) else abs(row['Amount']), axis=1)
-
+            # Basic European Categorization (Required for the Donut Chart)
             def categorize(desc):
-                desc = desc.lower()
-                if any(x in desc for x in ['zomato', 'swiggy', 'restaurant', 'cafe', 'blinkit', 'zepto', 'food']):
+                desc = str(desc).lower()
+                if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats']):
                     return 'Food & Groceries'
-                elif any(x in desc for x in ['medical', 'pharmacy', 'medicines', 'hospital']):
-                    return 'Health'
-                elif any(x in desc for x in ['cash', 'atm', 'wdl']):
-                    return 'Cash Withdrawal'
-                elif any(x in desc for x in ['paytm', 'razorpay', 'phonepe', 'upi']):
-                    return 'Transfers/Wallets'
+                elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt']):
+                    return 'Transport'
+                elif any(x in desc for x in ['tikkie', 'betaalverzoek']):
+                    return 'Debt Repayment (Tikkie)'
+                elif any(x in desc for x in ['huur', 'rent']):
+                    return 'Rent'
                 else:
                     return 'Others'
 
-            df['Category'] = df['Clean_Description'].apply(categorize)
+            df['Category'] = df[target_col].apply(categorize)
             
             st.session_state.raw_data = df
-            st.rerun() 
+            st.rerun()
         else:
-            st.error("Could not extract valid transaction data. Please check the CSV format.")
+            st.error("Could not find an 'Amount' column. Please check your CSV format.")
 
 # --- DASHBOARD & ANALYSIS SECTION ---
 if st.session_state.raw_data is not None:
     df = st.session_state.raw_data
-    sym = st.session_state.auto_currency
+    sym = "€" # Hardcoded for original European app
     
     total_in = df[df['Amount'] > 0]['Amount'].sum()
     total_out = df[df['Amount'] < 0]['Amount'].sum()
@@ -133,12 +93,11 @@ if st.session_state.raw_data is not None:
 
     st.divider()
 
-    # The Deterministic Math Engine
+    # --- PLOTLY INTERACTIVE DONUT CHART ---
     if 'Category' in df.columns:
         cat_summary = df.groupby('Category')['Amount'].sum().reset_index()
         cat_summary['Amount'] = cat_summary['Amount'].round(2)
         
-        # --- PLOTLY INTERACTIVE DONUT CHART ---
         expenses_df = cat_summary[cat_summary['Amount'] < 0].copy()
         expenses_df['Amount'] = expenses_df['Amount'].abs()
         
@@ -158,7 +117,9 @@ if st.session_state.raw_data is not None:
 
         category_summary_str = cat_summary.to_csv(index=False)
         others_df = df[df['Category'] == 'Others'].head(50)
-        others_str = others_df[['Clean_Description', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
+        desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
+        target_col = desc_cols[0] if desc_cols else df.columns[0]
+        others_str = others_df[[target_col, 'Amount']].to_csv(index=False) if not others_df.empty else "None"
     else:
         category_summary_str = "Category data unavailable."
         others_str = "N/A"
@@ -197,7 +158,6 @@ if st.session_state.raw_data is not None:
         {prompt}
         """
         
-        # Model Fallback Pipeline
         fallback_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         response = None
 
