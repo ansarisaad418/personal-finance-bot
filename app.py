@@ -31,7 +31,7 @@ if st.session_state.raw_data is None:
     st.info(
         "I am your intelligent financial assistant. Upload your raw bank statement, and I will automatically "
         "categorize your spending and provide a chat interface to answer questions like: \n"
-        "*'How much did I spend ordering food online this month?'* or *'What is my total cash flow?'*\n\n"
+        "*'What is included in my Debt Repayment?'* or *'What is my total cash flow?'*\n\n"
         "*(Note: Currently, I only accept standard European .csv files)*"
     )
     
@@ -52,7 +52,7 @@ if st.session_state.raw_data is None:
             df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
             df = df.dropna(subset=['Amount'])
             
-            # BUNQ FIX: Combine all description columns so we never miss keywords
+            # Combine all description columns
             desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
             df['Description_Clean'] = df[desc_cols].fillna('').astype(str).agg(' '.join, axis=1)
             
@@ -65,7 +65,6 @@ if st.session_state.raw_data is None:
                     return 'Salary'
                 elif any(x in desc for x in ['tikkie', 'betaalverzoek']):
                     return 'Friends & Family'
-                # Negative filter: If it's not a company, assume personal transfer
                 elif not any(x in desc for x in ['b.v.', 'b.v', ' bv', 'n.v', 'ltd', 'inc']):
                     return 'Friends & Family'
                 else:
@@ -73,33 +72,25 @@ if st.session_state.raw_data is None:
 
             def categorize_expense(desc):
                 desc = str(desc).lower()
-                # Expanded Food & Groceries
                 if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats', 'mcdonald', 'domino', 'restaurant', 'cafe', 'supermarkt', 'slagerij', 'avondwinkel', 'india', 'food', 'bon appetit']):
                     return 'Food & Groceries'
-                # Expanded Transport & Fuel
                 elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt', 'ovpay', 'shell', 'esso', 'tankstation']):
                     return 'Transport & Fuel'
-                # Separate Tikkies
                 elif any(x in desc for x in ['tikkie', 'betaalverzoek', 'paypal']):
                     return 'Debt Repayment'
                 elif any(x in desc for x in ['huur', 'rent']):
                     return 'Rent'
-                # Digital Subscriptions
                 elif any(x in desc for x in ['apple', 'google', 'lebara', 'spotify']):
                     return 'Subscriptions'
-                # FIX: Banking & International Transfers (Using Regex to avoid IBAN matching)
                 elif re.search(r'\bbunq bv\b|\bremitly\b|\bbank fee\b', desc):
                     return 'Banking & Services'
-                # Retail, Tobacco & Lifestyle
                 elif any(x in desc for x in ['tabak', 'rokertje', 'market', 'action', 'primera', 'kiosk', 'border']):
                     return 'Lifestyle & Retail'
-                # The Negative Filter for Personal Transfers
                 elif not any(x in desc for x in ['b.v.', 'b.v', ' bv', 'n.v', 'ltd', 'inc', 'sumup', 'pin', 'betaalautomaat']):
                     return 'Friends & Family'
                 else:
                     return 'Others'
 
-            # Apply specific logic based on Flow
             df.loc[df['Flow'] == 'Income', 'Category'] = df[df['Flow'] == 'Income']['Description_Clean'].apply(categorize_income)
             df.loc[df['Flow'] == 'Expense', 'Category'] = df[df['Flow'] == 'Expense']['Description_Clean'].apply(categorize_expense)
             
@@ -125,13 +116,11 @@ if st.session_state.raw_data is not None:
     st.divider()
 
     if 'Category' in df.columns:
-        # Split DataFrames by Flow
         income_df = df[df['Flow'] == 'Income']
         expense_df = df[df['Flow'] == 'Expense']
         
         income_summary = income_df.groupby('Category')['Amount'].sum().reset_index().sort_values(by='Amount', ascending=False)
         
-        # Abs() for plotting expenses
         expense_summary_raw = expense_df.groupby('Category')['Amount'].sum().reset_index()
         expense_summary_raw['Amount_Abs'] = expense_summary_raw['Amount'].abs()
         expense_summary = expense_summary_raw.sort_values(by='Amount_Abs', ascending=False)
@@ -168,12 +157,14 @@ if st.session_state.raw_data is not None:
 
         # Context Strings for AI
         inc_str = income_summary.to_csv(index=False)
-        exp_str = expense_summary[['Category', 'Amount']].to_csv(index=False) # Keep original negative values for AI
+        exp_str = expense_summary[['Category', 'Amount']].to_csv(index=False)
         
-        others_df = df[df['Category'].isin(['Others', 'Other Income'])].head(50)
-        others_str = others_df[['Flow', 'Description_Clean', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
+        # FIX: Pass a clean log of all transactions so the AI can look up names and specific items
+        # We only pass essential columns to save tokens.
+        transaction_log_df = df[['Flow', 'Category', 'Description_Clean', 'Amount']]
+        transaction_log_str = transaction_log_df.to_csv(index=False)
     else:
-        inc_str, exp_str, others_str = "N/A", "N/A", "N/A"
+        inc_str, exp_str, transaction_log_str = "N/A", "N/A", "N/A"
 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
@@ -184,6 +175,7 @@ if st.session_state.raw_data is not None:
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        # Updated prompt to instruct the AI how to use the new transaction log
         full_prompt = f"""
         CONTEXT: 
         You are a witty, professional Financial Analyst at MSAFinancials.
@@ -199,13 +191,13 @@ if st.session_state.raw_data is not None:
         PRE-COMPUTED EXPENSE SUMMARY:
         {exp_str}
         
-        UNCATEGORIZED SAMPLE ('Others' / 'Other Income'):
-        {others_str}
+        RAW TRANSACTION LOG:
+        {transaction_log_str}
         
         INSTRUCTIONS:
         1. Answer the user's question directly.
-        2. Strictly use the PRE-COMPUTED SUMMARIES for category math.
-        3. If asked about a specific merchant, use the UNCATEGORIZED SAMPLE to infer details.
+        2. Strictly use the PRE-COMPUTED SUMMARIES if asked for total category math.
+        3. If asked about what is included in a category (like Debt Repayment), look through the RAW TRANSACTION LOG to provide exact merchant names and amounts.
         4. Do NOT simply repeat the data back to the user unless requested.
         
         USER QUESTION: 
@@ -224,7 +216,6 @@ if st.session_state.raw_data is not None:
                     )
                     break 
                 except Exception as e:
-                    # Print exact error to Streamlit UI so we aren't flying blind
                     st.error(f"Failed to connect to {model_name}. Reason: {str(e)}")
                     continue 
             
