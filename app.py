@@ -51,12 +51,26 @@ if st.session_state.raw_data is None:
             df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
             df = df.dropna(subset=['Amount'])
             
-            # BUNQ FIX: Combine all description columns so we never miss keywords
+            # Combine all description columns
             desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
             df['Description_Clean'] = df[desc_cols].fillna('').astype(str).agg(' '.join, axis=1)
             
-            # Basic European Categorization
-            def categorize(desc):
+            # INTENT-FIRST ARCHITECTURE: Split Flows
+            df['Flow'] = df['Amount'].apply(lambda x: 'Income' if x > 0 else 'Expense')
+            
+            def categorize_income(desc):
+                desc = str(desc).lower()
+                if any(x in desc for x in ['b.v.', 'b.v', 'salary', 'salaris', 'payroll', 'flink', 'macblauw']):
+                    return 'Salary'
+                elif any(x in desc for x in ['tikkie', 'betaalverzoek']):
+                    return 'Friends & Family'
+                # Negative filter: If it's not a company, assume personal transfer
+                elif not any(x in desc for x in ['b.v', 'n.v', 'ltd', 'inc']):
+                    return 'Friends & Family'
+                else:
+                    return 'Other Income'
+
+            def categorize_expense(desc):
                 desc = str(desc).lower()
                 if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats']):
                     return 'Food & Groceries'
@@ -66,10 +80,16 @@ if st.session_state.raw_data is None:
                     return 'Debt Repayment'
                 elif any(x in desc for x in ['huur', 'rent']):
                     return 'Rent'
+                elif any(x in desc for x in ['apple', 'google', 'lebara', 'spotify']):
+                    return 'Subscriptions & Telecom'
+                elif any(x in desc for x in ['tabak', 'rokertje', 'market', 'action', 'primera', 'kiosk']):
+                    return 'Lifestyle & Retail'
                 else:
                     return 'Others'
 
-            df['Category'] = df['Description_Clean'].apply(categorize)
+            # Apply specific logic based on Flow
+            df.loc[df['Flow'] == 'Income', 'Category'] = df[df['Flow'] == 'Income']['Description_Clean'].apply(categorize_income)
+            df.loc[df['Flow'] == 'Expense', 'Category'] = df[df['Flow'] == 'Expense']['Description_Clean'].apply(categorize_expense)
             
             st.session_state.raw_data = df
             st.rerun()
@@ -92,42 +112,56 @@ if st.session_state.raw_data is not None:
 
     st.divider()
 
-    # --- PLOTLY INTERACTIVE DONUT CHART ---
     if 'Category' in df.columns:
-        expenses_only = df[df['Amount'] < 0].copy()
-        expenses_only['Amount'] = expenses_only['Amount'].abs()
+        # Split DataFrames by Flow
+        income_df = df[df['Flow'] == 'Income']
+        expense_df = df[df['Flow'] == 'Expense']
         
-        expenses_df = expenses_only.groupby('Category')['Amount'].sum().reset_index()
-        expenses_df = expenses_df.sort_values(by='Amount', ascending=False)
+        income_summary = income_df.groupby('Category')['Amount'].sum().reset_index().sort_values(by='Amount', ascending=False)
         
-        if not expenses_df.empty:
-            st.markdown("### 🍩 Spending Breakdown")
-            
-            top_cat = expenses_df.iloc[0]
-            st.warning(f"💡 **Insight:** Your biggest expense category is **{top_cat['Category']}** at **{sym}{top_cat['Amount']:,.2f}**.")
-            
-            fig = px.pie(
-                expenses_df, 
-                values='Amount', 
-                names='Category', 
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
-            fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20))
-            st.plotly_chart(fig, use_container_width=True)
-            st.divider()
+        # Abs() for plotting expenses
+        expense_summary_raw = expense_df.groupby('Category')['Amount'].sum().reset_index()
+        expense_summary_raw['Amount_Abs'] = expense_summary_raw['Amount'].abs()
+        expense_summary = expense_summary_raw.sort_values(by='Amount_Abs', ascending=False)
+        
+        st.markdown("### 🍩 Cashflow Breakdown")
+        
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            if not income_summary.empty:
+                top_in = income_summary.iloc[0]
+                st.success(f"📈 **Top Income:** {top_in['Category']} ({sym}{top_in['Amount']:,.2f})")
+                fig_in = px.pie(
+                    income_summary, values='Amount', names='Category', hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Safe
+                )
+                fig_in.update_traces(textposition='inside', textinfo='percent+label')
+                fig_in.update_layout(margin=dict(t=20, b=20, l=20, r=20), showlegend=False)
+                st.plotly_chart(fig_in, use_container_width=True)
 
-        inflows = df[df['Amount'] > 0].groupby('Category')['Amount'].sum().rename('Income')
-        outflows = df[df['Amount'] < 0].groupby('Category')['Amount'].sum().abs().rename('Expense')
-        llm_summary = pd.concat([inflows, outflows], axis=1).fillna(0).reset_index()
-        category_summary_str = llm_summary.to_csv(index=False)
+        with chart_col2:
+            if not expense_summary.empty:
+                top_out = expense_summary.iloc[0]
+                st.warning(f"📉 **Top Expense:** {top_out['Category']} ({sym}{top_out['Amount_Abs']:,.2f})")
+                fig_out = px.pie(
+                    expense_summary, values='Amount_Abs', names='Category', hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_out.update_traces(textposition='inside', textinfo='percent+label')
+                fig_out.update_layout(margin=dict(t=20, b=20, l=20, r=20), showlegend=False)
+                st.plotly_chart(fig_out, use_container_width=True)
+
+        st.divider()
+
+        # Context Strings for AI
+        inc_str = income_summary.to_csv(index=False)
+        exp_str = expense_summary[['Category', 'Amount']].to_csv(index=False) # Keep original negative values for AI
         
-        others_df = df[df['Category'] == 'Others'].head(50)
-        others_str = others_df[['Description_Clean', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
+        others_df = df[df['Category'].isin(['Others', 'Other Income'])].head(50)
+        others_str = others_df[['Flow', 'Description_Clean', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
     else:
-        category_summary_str = "Category data unavailable."
-        others_str = "N/A"
+        inc_str, exp_str, others_str = "N/A", "N/A", "N/A"
 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
@@ -147,16 +181,19 @@ if st.session_state.raw_data is not None:
         - Total Outflow: {sym}{total_out:.2f}
         - Net Cashflow: {sym}{net_cashflow:.2f}
         
-        PRE-COMPUTED CATEGORY SUMMARY (Income vs Expense):
-        {category_summary_str}
+        PRE-COMPUTED INCOME SUMMARY:
+        {inc_str}
         
-        UNCATEGORIZED 'OTHERS' SAMPLE:
+        PRE-COMPUTED EXPENSE SUMMARY:
+        {exp_str}
+        
+        UNCATEGORIZED SAMPLE ('Others' / 'Other Income'):
         {others_str}
         
         INSTRUCTIONS:
         1. Answer the user's question directly.
-        2. If asked about a category, strictly use the PRE-COMPUTED CATEGORY SUMMARY.
-        3. If asked about a specific merchant, use the UNCATEGORIZED 'OTHERS' list.
+        2. Strictly use the PRE-COMPUTED SUMMARIES for category math.
+        3. If asked about a specific merchant, use the UNCATEGORIZED SAMPLE to infer details.
         4. Do NOT simply repeat the data back to the user unless requested.
         
         USER QUESTION: 
