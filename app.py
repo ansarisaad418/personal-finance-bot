@@ -2,6 +2,7 @@ import streamlit as st
 from google import genai
 import pandas as pd
 import plotly.express as px
+import re
 
 # 1. Setup & Security
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
@@ -51,7 +52,7 @@ if st.session_state.raw_data is None:
             df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
             df = df.dropna(subset=['Amount'])
             
-            # Combine all description columns
+            # BUNQ FIX: Combine all description columns so we never miss keywords
             desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
             df['Description_Clean'] = df[desc_cols].fillna('').astype(str).agg(' '.join, axis=1)
             
@@ -60,30 +61,41 @@ if st.session_state.raw_data is None:
             
             def categorize_income(desc):
                 desc = str(desc).lower()
-                if any(x in desc for x in ['b.v.', 'b.v', 'salary', 'salaris', 'payroll', 'flink', 'macblauw']):
+                if any(x in desc for x in ['b.v.', 'b.v', ' bv', 'salary', 'salaris', 'payroll', 'flink', 'macblauw']):
                     return 'Salary'
                 elif any(x in desc for x in ['tikkie', 'betaalverzoek']):
                     return 'Friends & Family'
                 # Negative filter: If it's not a company, assume personal transfer
-                elif not any(x in desc for x in ['b.v', 'n.v', 'ltd', 'inc']):
+                elif not any(x in desc for x in ['b.v.', 'b.v', ' bv', 'n.v', 'ltd', 'inc']):
                     return 'Friends & Family'
                 else:
                     return 'Other Income'
 
             def categorize_expense(desc):
                 desc = str(desc).lower()
-                if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats']):
+                # Expanded Food & Groceries
+                if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats', 'mcdonald', 'domino', 'restaurant', 'cafe', 'supermarkt', 'slagerij', 'avondwinkel', 'india', 'food', 'bon appetit']):
                     return 'Food & Groceries'
-                elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt', 'ovpay']):
-                    return 'Transport'
+                # Expanded Transport & Fuel
+                elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt', 'ovpay', 'shell', 'esso', 'tankstation']):
+                    return 'Transport & Fuel'
+                # Separate Tikkies
                 elif any(x in desc for x in ['tikkie', 'betaalverzoek', 'paypal']):
                     return 'Debt Repayment'
                 elif any(x in desc for x in ['huur', 'rent']):
                     return 'Rent'
+                # Digital Subscriptions
                 elif any(x in desc for x in ['apple', 'google', 'lebara', 'spotify']):
-                    return 'Subscriptions & Telecom'
-                elif any(x in desc for x in ['tabak', 'rokertje', 'market', 'action', 'primera', 'kiosk']):
+                    return 'Subscriptions'
+                # FIX: Banking & International Transfers (Using Regex to avoid IBAN matching)
+                elif re.search(r'\bbunq bv\b|\bremitly\b|\bbank fee\b', desc):
+                    return 'Banking & Services'
+                # Retail, Tobacco & Lifestyle
+                elif any(x in desc for x in ['tabak', 'rokertje', 'market', 'action', 'primera', 'kiosk', 'border']):
                     return 'Lifestyle & Retail'
+                # The Negative Filter for Personal Transfers
+                elif not any(x in desc for x in ['b.v.', 'b.v', ' bv', 'n.v', 'ltd', 'inc', 'sumup', 'pin', 'betaalautomaat']):
+                    return 'Friends & Family'
                 else:
                     return 'Others'
 
@@ -212,6 +224,7 @@ if st.session_state.raw_data is not None:
                     )
                     break 
                 except Exception as e:
+                    # Print exact error to Streamlit UI so we aren't flying blind
                     st.error(f"Failed to connect to {model_name}. Reason: {str(e)}")
                     continue 
             
