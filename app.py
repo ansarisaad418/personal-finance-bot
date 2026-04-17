@@ -52,11 +52,12 @@ if st.session_state.raw_data is None:
             df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
             df = df.dropna(subset=['Amount'])
             
-            # Identify the description column (usually 'Description', 'Name', or 'Counterparty')
+            # DRY FIX: Identify the description column ONCE and rename it
             desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
             target_col = desc_cols[0] if desc_cols else df.columns[0]
+            df = df.rename(columns={target_col: 'Description_Clean'})
             
-            # Basic European Categorization (Required for the Donut Chart)
+            # Basic European Categorization
             def categorize(desc):
                 desc = str(desc).lower()
                 if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats']):
@@ -70,7 +71,7 @@ if st.session_state.raw_data is None:
                 else:
                     return 'Others'
 
-            df['Category'] = df[target_col].apply(categorize)
+            df['Category'] = df['Description_Clean'].apply(categorize)
             
             st.session_state.raw_data = df
             st.rerun()
@@ -80,7 +81,7 @@ if st.session_state.raw_data is None:
 # --- DASHBOARD & ANALYSIS SECTION ---
 if st.session_state.raw_data is not None:
     df = st.session_state.raw_data
-    sym = "€" # Hardcoded for original European app
+    sym = "€" 
     
     total_in = df[df['Amount'] > 0]['Amount'].sum()
     total_out = df[df['Amount'] < 0]['Amount'].sum()
@@ -101,8 +102,16 @@ if st.session_state.raw_data is not None:
         expenses_df = cat_summary[cat_summary['Amount'] < 0].copy()
         expenses_df['Amount'] = expenses_df['Amount'].abs()
         
+        # SORTING FIX: Sort before extracting the top insight and plotting
+        expenses_df = expenses_df.sort_values(by='Amount', ascending=False)
+        
         if not expenses_df.empty:
             st.markdown("### 🍩 Spending Breakdown")
+            
+            # INSIGHT FIX: Dynamic top category callout
+            top_cat = expenses_df.iloc[0]
+            st.warning(f"💡 **Insight:** Your biggest expense category is **{top_cat['Category']}** at **{sym}{top_cat['Amount']:,.2f}**.")
+            
             fig = px.pie(
                 expenses_df, 
                 values='Amount', 
@@ -117,9 +126,8 @@ if st.session_state.raw_data is not None:
 
         category_summary_str = cat_summary.to_csv(index=False)
         others_df = df[df['Category'] == 'Others'].head(50)
-        desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
-        target_col = desc_cols[0] if desc_cols else df.columns[0]
-        others_str = others_df[[target_col, 'Amount']].to_csv(index=False) if not others_df.empty else "None"
+        # DRY FIX: Reusing 'Description_Clean'
+        others_str = others_df[['Description_Clean', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
     else:
         category_summary_str = "Category data unavailable."
         others_str = "N/A"
