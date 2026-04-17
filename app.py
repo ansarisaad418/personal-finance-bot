@@ -63,7 +63,7 @@ if st.session_state.raw_data is None:
                 elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt', 'ovpay']):
                     return 'Transport'
                 elif any(x in desc for x in ['tikkie', 'betaalverzoek', 'paypal']):
-                    return 'Debt Repayment' # Personalized to your Tikkie rule!
+                    return 'Debt Repayment'
                 elif any(x in desc for x in ['huur', 'rent']):
                     return 'Rent'
                 else:
@@ -94,7 +94,6 @@ if st.session_state.raw_data is not None:
 
     # --- PLOTLY INTERACTIVE DONUT CHART ---
     if 'Category' in df.columns:
-        # Isolate expenses FIRST so income doesn't mathematically net them out
         expenses_only = df[df['Amount'] < 0].copy()
         expenses_only['Amount'] = expenses_only['Amount'].abs()
         
@@ -119,7 +118,6 @@ if st.session_state.raw_data is not None:
             st.plotly_chart(fig, use_container_width=True)
             st.divider()
 
-        # Give the AI a perfectly split summary of Income vs Expenses
         inflows = df[df['Amount'] > 0].groupby('Category')['Amount'].sum().rename('Income')
         outflows = df[df['Amount'] < 0].groupby('Category')['Amount'].sum().abs().rename('Expense')
         llm_summary = pd.concat([inflows, outflows], axis=1).fillna(0).reset_index()
@@ -135,7 +133,7 @@ if st.session_state.raw_data is not None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Ask about your finances (e.g., 'How much did I spend ordering food online?')..."):
+    if prompt := st.chat_input("Ask about your finances..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -170,20 +168,17 @@ if st.session_state.raw_data is not None:
 
         with st.spinner("Analyzing..."):
             for model_name in fallback_models:
-               try:
+                try:
                     response = client.models.generate_content(
                         model=model_name, 
                         contents=full_prompt
                     )
                     break 
                 except Exception as e:
-                    # This will print the exact reason Google rejected the request
-                    st.error(f"Failed on {model_name}: {str(e)}")
-                    continue
-        # THIS IS WHERE THE INDENTATION BROKE PREVIOUSLY. IT IS NOW FIXED.
+                    st.error(f"Failed to connect to {model_name}. Reason: {str(e)}")
+                    continue 
+            
         if response:
             st.session_state.chat_history.append({"role": "assistant", "content": response.text})
             with st.chat_message("assistant"):
                 st.markdown(response.text)
-        else:
-            st.error("AI Connection Failed across all fallback models. Please check your API quota.")
