@@ -94,7 +94,7 @@ if st.session_state.raw_data is not None:
 
     # --- PLOTLY INTERACTIVE DONUT CHART ---
     if 'Category' in df.columns:
-        # BUG FIX 1: Isolate expenses FIRST so income doesn't mathematically net them out
+        # Isolate expenses FIRST so income doesn't mathematically net them out
         expenses_only = df[df['Amount'] < 0].copy()
         expenses_only['Amount'] = expenses_only['Amount'].abs()
         
@@ -119,7 +119,7 @@ if st.session_state.raw_data is not None:
             st.plotly_chart(fig, use_container_width=True)
             st.divider()
 
-        # BUG FIX 2: Give the AI a perfectly split summary of Income vs Expenses
+        # Give the AI a perfectly split summary of Income vs Expenses
         inflows = df[df['Amount'] > 0].groupby('Category')['Amount'].sum().rename('Income')
         outflows = df[df['Amount'] < 0].groupby('Category')['Amount'].sum().abs().rename('Expense')
         llm_summary = pd.concat([inflows, outflows], axis=1).fillna(0).reset_index()
@@ -179,12 +179,9 @@ if st.session_state.raw_data is not None:
                 except Exception:
                     continue 
             
+        # THIS IS WHERE THE INDENTATION BROKE PREVIOUSLY. IT IS NOW FIXED.
         if response:
             st.session_state.chat_history.append({"role": "assistant", "content": response.text})
-            with st.chat_message("assistant"):
-                st.markdown(response.text)
-        else:
-            st.error("AI Connection Failed across all fallback models. Please check your API quota.")
             with st.chat_message("assistant"):
                 st.markdown(response.text)
         else:
