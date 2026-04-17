@@ -41,7 +41,6 @@ if st.session_state.raw_data is None:
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         
-        # Original European Formatting Logic
         if 'Amount' in df.columns:
             df['Amount'] = df['Amount'].astype(str).str.replace('€', '', regex=False).str.replace(' ', '', regex=False)
             def clean_currency(val):
@@ -52,20 +51,19 @@ if st.session_state.raw_data is None:
             df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
             df = df.dropna(subset=['Amount'])
             
-            # DRY FIX: Identify the description column ONCE and rename it
+            # BUNQ FIX: Combine all description columns so we never miss keywords
             desc_cols = [c for c in df.columns if c.lower() in ['description', 'name', 'counterparty', 'mededelingen']]
-            target_col = desc_cols[0] if desc_cols else df.columns[0]
-            df = df.rename(columns={target_col: 'Description_Clean'})
+            df['Description_Clean'] = df[desc_cols].fillna('').astype(str).agg(' '.join, axis=1)
             
             # Basic European Categorization
             def categorize(desc):
                 desc = str(desc).lower()
                 if any(x in desc for x in ['albert heijn', 'jumbo', 'dirk', 'aldi', 'lidl', 'thuisbezorgd', 'uber eats']):
                     return 'Food & Groceries'
-                elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt']):
+                elif any(x in desc for x in ['ns', 'gvb', 'ov-chipkaart', 'uber', 'bolt', 'ovpay']):
                     return 'Transport'
-                elif any(x in desc for x in ['tikkie', 'betaalverzoek']):
-                    return 'Debt Repayment (Tikkie)'
+                elif any(x in desc for x in ['tikkie', 'betaalverzoek', 'paypal']):
+                    return 'Debt Repayment' # Personalized to your Tikkie rule!
                 elif any(x in desc for x in ['huur', 'rent']):
                     return 'Rent'
                 else:
@@ -96,19 +94,16 @@ if st.session_state.raw_data is not None:
 
     # --- PLOTLY INTERACTIVE DONUT CHART ---
     if 'Category' in df.columns:
-        cat_summary = df.groupby('Category')['Amount'].sum().reset_index()
-        cat_summary['Amount'] = cat_summary['Amount'].round(2)
+        # BUG FIX 1: Isolate expenses FIRST so income doesn't mathematically net them out
+        expenses_only = df[df['Amount'] < 0].copy()
+        expenses_only['Amount'] = expenses_only['Amount'].abs()
         
-        expenses_df = cat_summary[cat_summary['Amount'] < 0].copy()
-        expenses_df['Amount'] = expenses_df['Amount'].abs()
-        
-        # SORTING FIX: Sort before extracting the top insight and plotting
+        expenses_df = expenses_only.groupby('Category')['Amount'].sum().reset_index()
         expenses_df = expenses_df.sort_values(by='Amount', ascending=False)
         
         if not expenses_df.empty:
             st.markdown("### 🍩 Spending Breakdown")
             
-            # INSIGHT FIX: Dynamic top category callout
             top_cat = expenses_df.iloc[0]
             st.warning(f"💡 **Insight:** Your biggest expense category is **{top_cat['Category']}** at **{sym}{top_cat['Amount']:,.2f}**.")
             
@@ -124,9 +119,13 @@ if st.session_state.raw_data is not None:
             st.plotly_chart(fig, use_container_width=True)
             st.divider()
 
-        category_summary_str = cat_summary.to_csv(index=False)
+        # BUG FIX 2: Give the AI a perfectly split summary of Income vs Expenses
+        inflows = df[df['Amount'] > 0].groupby('Category')['Amount'].sum().rename('Income')
+        outflows = df[df['Amount'] < 0].groupby('Category')['Amount'].sum().abs().rename('Expense')
+        llm_summary = pd.concat([inflows, outflows], axis=1).fillna(0).reset_index()
+        category_summary_str = llm_summary.to_csv(index=False)
+        
         others_df = df[df['Category'] == 'Others'].head(50)
-        # DRY FIX: Reusing 'Description_Clean'
         others_str = others_df[['Description_Clean', 'Amount']].to_csv(index=False) if not others_df.empty else "None"
     else:
         category_summary_str = "Category data unavailable."
@@ -150,7 +149,7 @@ if st.session_state.raw_data is not None:
         - Total Outflow: {sym}{total_out:.2f}
         - Net Cashflow: {sym}{net_cashflow:.2f}
         
-        PRE-COMPUTED CATEGORY SUMMARY:
+        PRE-COMPUTED CATEGORY SUMMARY (Income vs Expense):
         {category_summary_str}
         
         UNCATEGORIZED 'OTHERS' SAMPLE:
@@ -182,6 +181,10 @@ if st.session_state.raw_data is not None:
             
         if response:
             st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+            with st.chat_message("assistant"):
+                st.markdown(response.text)
+        else:
+            st.error("AI Connection Failed across all fallback models. Please check your API quota.")
             with st.chat_message("assistant"):
                 st.markdown(response.text)
         else:
