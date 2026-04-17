@@ -170,15 +170,16 @@ if st.session_state.raw_data is not None:
 
         with st.spinner("Analyzing..."):
             for model_name in fallback_models:
-                try:
+               try:
                     response = client.models.generate_content(
                         model=model_name, 
                         contents=full_prompt
                     )
                     break 
-                except Exception:
-                    continue 
-            
+                except Exception as e:
+                    # This will print the exact reason Google rejected the request
+                    st.error(f"Failed on {model_name}: {str(e)}")
+                    continue
         # THIS IS WHERE THE INDENTATION BROKE PREVIOUSLY. IT IS NOW FIXED.
         if response:
             st.session_state.chat_history.append({"role": "assistant", "content": response.text})
